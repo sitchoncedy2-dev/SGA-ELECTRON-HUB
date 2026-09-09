@@ -1,0 +1,891 @@
+--[[
+    MYNGUU PRIVATE SCRIPT
+    Game: Muscle Legends
+    UI: Fluent (not WindUI)
+    Features adapted from public Muscle Legends hub logic
+    Made for private use
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualUser = game:GetService("VirtualUser")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local muscleEvent = LocalPlayer:WaitForChild("muscleEvent")
+local rEvents = ReplicatedStorage:WaitForChild("rEvents")
+
+-- ===================== FLUENT UI =====================
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "MYNGUU PRIVATE SCRIPT",
+    SubTitle = "Muscle Legends | Fluent UI",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "home" }),
+    Farming = Window:AddTab({ Title = "Farming", Icon = "dumbbell" }),
+    Pets = Window:AddTab({ Title = "Pets", Icon = "paw-print" }),
+    Killing = Window:AddTab({ Title = "Killing", Icon = "swords" }),
+    Teleports = Window:AddTab({ Title = "Teleports", Icon = "map-pin" }),
+    Specs = Window:AddTab({ Title = "Specs", Icon = "scan-eye" }),
+    Info = Window:AddTab({ Title = "Info", Icon = "info" })
+}
+
+local Options = Fluent.Options
+
+-- ===================== HELPERS =====================
+local function notify(title, content, duration)
+    Fluent:Notify({
+        Title = title or "MYNGUU",
+        Content = content or "",
+        Duration = duration or 3
+    })
+end
+
+local function getChar()
+    return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+end
+
+local function getHRP()
+    local c = getChar()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHum()
+    local c = getChar()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function equipTool(name)
+    local char = getChar()
+    local hum = getHum()
+    local bag = LocalPlayer:FindFirstChild("Backpack")
+    if not char or not hum then return false end
+    if char:FindFirstChild(name) then return true end
+    if bag then
+        local t = bag:FindFirstChild(name)
+        if t then
+            hum:EquipTool(t)
+            return true
+        end
+    end
+    return false
+end
+
+local function fireRep()
+    pcall(function()
+        muscleEvent:FireServer("rep")
+    end)
+end
+
+local function firePunch()
+    pcall(function()
+        muscleEvent:FireServer("punch", "leftHand")
+        muscleEvent:FireServer("punch", "rightHand")
+        muscleEvent:FireServer("punch")
+    end)
+    local char = getChar()
+    local punch = char and char:FindFirstChild("Punch")
+    if punch then
+        pcall(function() punch:Activate() end)
+    end
+end
+
+-- Anti AFK
+LocalPlayer.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end)
+
+-- ===================== MAIN TAB =====================
+Tabs.Main:AddParagraph({
+    Title = "Settings",
+    Content = "Size / Speed / Anti Fling / Misc"
+})
+
+local userSize = 2
+local sizeActive = false
+local userSpeed = 120
+local speedActive = false
+
+Tabs.Main:AddInput("SizeInput", {
+    Title = "Size",
+    Default = "2",
+    Numeric = true,
+    Finished = false,
+    Callback = function(v)
+        local n = tonumber(v)
+        if n and n > 0 then userSize = n end
+    end
+})
+
+Tabs.Main:AddToggle("SetSize", {
+    Title = "Set Size",
+    Default = false,
+    Callback = function(v)
+        sizeActive = v
+    end
+})
+
+task.spawn(function()
+    while true do
+        if sizeActive then
+            pcall(function()
+                rEvents.changeSpeedSizeRemote:InvokeServer("changeSize", userSize)
+            end)
+        end
+        task.wait(0.15)
+    end
+end)
+
+Tabs.Main:AddInput("SpeedInput", {
+    Title = "Speed",
+    Default = "120",
+    Numeric = true,
+    Finished = false,
+    Callback = function(v)
+        local n = tonumber(v)
+        if n and n > 0 then userSpeed = n end
+    end
+})
+
+Tabs.Main:AddToggle("SetSpeed", {
+    Title = "Set Speed",
+    Default = false,
+    Callback = function(v)
+        speedActive = v
+    end
+})
+
+task.spawn(function()
+    while true do
+        if speedActive then
+            pcall(function()
+                rEvents.changeSpeedSizeRemote:InvokeServer("changeSpeed", userSpeed)
+            end)
+        end
+        task.wait(0.15)
+    end
+end)
+
+Tabs.Main:AddToggle("AntiFling", {
+    Title = "Anti Fling",
+    Default = true,
+    Callback = function(bool)
+        local char = workspace:FindFirstChild(LocalPlayer.Name)
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        if bool then
+            if not root:FindFirstChild("MYNGUU_BV") then
+                local bv = Instance.new("BodyVelocity")
+                bv.Name = "MYNGUU_BV"
+                bv.MaxForce = Vector3.new(100000, 0, 100000)
+                bv.Velocity = Vector3.new(0, 0, 0)
+                bv.P = 1250
+                bv.Parent = root
+            end
+        else
+            local bv = root:FindFirstChild("MYNGUU_BV")
+            if bv then bv:Destroy() end
+        end
+    end
+})
+
+local lockRunning = false
+Tabs.Main:AddToggle("LockPos", {
+    Title = "Lock Position",
+    Default = false,
+    Callback = function(state)
+        lockRunning = state
+        if state then
+            local hrp = getHRP()
+            if not hrp then return end
+            local lockPos = hrp.Position
+            task.spawn(function()
+                while lockRunning do
+                    local r = getHRP()
+                    if r then
+                        r.Velocity = Vector3.new(0, 0, 0)
+                        r.RotVelocity = Vector3.new(0, 0, 0)
+                        r.CFrame = CFrame.new(lockPos)
+                    end
+                    task.wait(0.05)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Main:AddToggle("ShowPets", {
+    Title = "Show Pets",
+    Default = false,
+    Callback = function(bool)
+        if LocalPlayer:FindFirstChild("hidePets") then
+            LocalPlayer.hidePets.Value = bool
+        end
+    end
+})
+
+Tabs.Main:AddToggle("ShowOtherPets", {
+    Title = "Show Other Pets",
+    Default = false,
+    Callback = function(bool)
+        if LocalPlayer:FindFirstChild("showOtherPetsOn") then
+            LocalPlayer.showOtherPetsOn.Value = bool
+        end
+    end
+})
+
+Tabs.Main:AddToggle("InfJump", {
+    Title = "Infinite Jump",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_InfJump = bool
+    end
+})
+
+UserInputService.JumpRequest:Connect(function()
+    if _G.MYNGUU_InfJump then
+        local hum = getHum()
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+Tabs.Main:AddToggle("FortuneWheel", {
+    Title = "Auto Spin Fortune Wheel",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_Wheel = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_Wheel do
+                    pcall(function()
+                        local chances = ReplicatedStorage:FindFirstChild("fortuneWheelChances")
+                        local wheel = chances and chances:FindFirstChild("Fortune Wheel")
+                        local remote = rEvents:FindFirstChild("openFortuneWheelRemote")
+                        if remote and wheel then
+                            remote:InvokeServer("openFortuneWheel", wheel)
+                        end
+                    end)
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Main:AddDropdown("TimeOfDay", {
+    Title = "Change Time",
+    Values = {"Day", "Night", "Midnight", "Noon"},
+    Multi = false,
+    Default = 1,
+    Callback = function(v)
+        if v == "Day" or v == "Noon" then
+            Lighting.ClockTime = 12
+        elseif v == "Night" then
+            Lighting.ClockTime = 20
+        elseif v == "Midnight" then
+            Lighting.ClockTime = 0
+        end
+    end
+})
+
+-- ===================== FARMING TAB =====================
+Tabs.Farming:AddParagraph({
+    Title = "Exercise Farm",
+    Content = "Select tool then enable Auto Exercise"
+})
+
+local SelectedTool = "Weight"
+local AutoFarm = false
+
+Tabs.Farming:AddDropdown("ToolSelect", {
+    Title = "Select Exercise",
+    Values = {"Weight", "Pushups", "Situps", "Handstands", "Fast Punch", "Stomp", "Ground Slam"},
+    Multi = false,
+    Default = 1,
+    Callback = function(v)
+        SelectedTool = v
+    end
+})
+
+Tabs.Farming:AddToggle("AutoExercise", {
+    Title = "Auto Exercise",
+    Default = false,
+    Callback = function(enabled)
+        AutoFarm = enabled
+        if enabled then
+            task.spawn(function()
+                while AutoFarm do
+                    pcall(function()
+                        if SelectedTool == "Weight" or SelectedTool == "Pushups" or SelectedTool == "Situps" or SelectedTool == "Handstands" then
+                            equipTool(SelectedTool)
+                            fireRep()
+                        elseif SelectedTool == "Fast Punch" then
+                            equipTool("Punch")
+                            firePunch()
+                        elseif SelectedTool == "Stomp" then
+                            equipTool("Stomp")
+                            muscleEvent:FireServer("stomp")
+                            local t = getChar() and getChar():FindFirstChild("Stomp")
+                            if t then t:Activate() end
+                        elseif SelectedTool == "Ground Slam" then
+                            equipTool("Ground Slam")
+                            muscleEvent:FireServer("slam")
+                            local t = getChar() and getChar():FindFirstChild("Ground Slam")
+                            if t then t:Activate() end
+                        end
+                    end)
+                    task.wait()
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Farming:AddToggle("AutoLiftGP", {
+    Title = "Auto Lift (no delay)",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_Lift = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_Lift do
+                    fireRep()
+                    task.wait()
+                end
+            end)
+        end
+    end
+})
+
+-- Rebirth
+local targetRebirths = 0
+local isAutoRebirthing = false
+
+Tabs.Farming:AddInput("RebTarget", {
+    Title = "Rebirth Target (0 = infinite)",
+    Default = "0",
+    Numeric = true,
+    Finished = false,
+    Callback = function(v)
+        targetRebirths = tonumber(v) or 0
+    end
+})
+
+Tabs.Farming:AddToggle("AutoRebirth", {
+    Title = "Auto Rebirth",
+    Default = false,
+    Callback = function(enabled)
+        isAutoRebirthing = enabled
+        if enabled then
+            task.spawn(function()
+                while isAutoRebirthing do
+                    pcall(function()
+                        local ls = LocalPlayer:FindFirstChild("leaderstats")
+                        local reb = ls and ls:FindFirstChild("Rebirths")
+                        if targetRebirths > 0 and reb and reb.Value >= targetRebirths then
+                            isAutoRebirthing = false
+                            notify("Rebirth", "Reached target " .. tostring(targetRebirths))
+                            return
+                        end
+                        rEvents.rebirthRemote:InvokeServer("rebirthRequest")
+                    end)
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end
+})
+
+-- Auto King
+local KING_CF = CFrame.new(-8665.4, 17.21, -5792.9)
+Tabs.Farming:AddToggle("AutoKing", {
+    Title = "Auto King (TP + stay)",
+    Default = false,
+    Callback = function(enabled)
+        _G.MYNGUU_King = enabled
+        if enabled then
+            task.spawn(function()
+                while _G.MYNGUU_King do
+                    pcall(function()
+                        local hrp = getHRP()
+                        if hrp and (hrp.Position - KING_CF.Position).Magnitude > 5 then
+                            hrp.CFrame = KING_CF
+                        end
+                    end)
+                    task.wait(0.2)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Farming:AddToggle("AutoPunchRock", {
+    Title = "Auto Punch (Fast)",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_Punch = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_Punch do
+                    equipTool("Punch")
+                    firePunch()
+                    task.wait()
+                end
+            end)
+        end
+    end
+})
+
+-- ===================== PETS TAB =====================
+Tabs.Pets:AddParagraph({
+    Title = "Pet Shop",
+    Content = "Uses cPetShopRemote / cPetShopFolder"
+})
+
+local petList = {
+    "Apex Overlord", "Core Pup", "Plasma Ravager", "Reactor Beast", "Titan Reactor", "Volt Talon",
+    "Biohazard Ape", "Biohazard Overlord", "Nuclear Hydra", "Omega Overlord",
+    "Powercore Hound", "Radio Rat", "Sludge Croc", "Titanium Hydra", "Toxic Hound",
+    "Swift Samurai", "Tribal Overlord", "Mighty Monster", "Jungle Captain",
+    "Golden Viking", "Muscle Sensei", "Neon Guardian", "Wild Wizards"
+}
+table.sort(petList)
+
+-- merge live folder
+pcall(function()
+    local folder = ReplicatedStorage:FindFirstChild("cPetShopFolder")
+    local shared = ReplicatedStorage:FindFirstChild("shared")
+    local runtime = shared and shared:FindFirstChild("runtime")
+    local folder2 = runtime and runtime:FindFirstChild("cPetShopFolder")
+    local seen = {}
+    for _, n in ipairs(petList) do seen[n] = true end
+    for _, f in ipairs({folder, folder2}) do
+        if f then
+            for _, ch in ipairs(f:GetChildren()) do
+                if not seen[ch.Name] then
+                    petList[#petList + 1] = ch.Name
+                    seen[ch.Name] = true
+                end
+            end
+        end
+    end
+    table.sort(petList)
+end)
+
+local selectedPet = petList[1] or "Apex Overlord"
+
+Tabs.Pets:AddDropdown("PetSelect", {
+    Title = "Select Pet",
+    Values = petList,
+    Multi = false,
+    Default = 1,
+    Callback = function(v)
+        selectedPet = v
+    end
+})
+
+local function buyPet(name)
+    local ok = false
+    pcall(function()
+        local remote = rEvents:FindFirstChild("cPetShopRemote") or ReplicatedStorage:FindFirstChild("cPetShopRemote")
+        local shared = ReplicatedStorage:FindFirstChild("shared")
+        local runtime = shared and shared:FindFirstChild("runtime")
+        local folder = (runtime and runtime:FindFirstChild("cPetShopFolder"))
+            or ReplicatedStorage:FindFirstChild("cPetShopFolder")
+        local petObj = folder and folder:FindFirstChild(name)
+        if remote and petObj then
+            if remote:IsA("RemoteFunction") then
+                remote:InvokeServer(petObj)
+            else
+                remote:FireServer(petObj)
+            end
+            ok = true
+        end
+    end)
+    return ok
+end
+
+Tabs.Pets:AddButton({
+    Title = "Buy Selected Pet",
+    Callback = function()
+        local ok = buyPet(selectedPet)
+        notify("Pets", ok and ("Bought: " .. selectedPet) or "Failed / missing remote")
+    end
+})
+
+Tabs.Pets:AddToggle("AutoBuyPet", {
+    Title = "Auto Buy Selected Pet",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_BuyPet = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_BuyPet do
+                    buyPet(selectedPet)
+                    task.wait(0.15)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Pets:AddButton({
+    Title = "Equip Best Pets (first 8)",
+    Callback = function()
+        pcall(function()
+            local equip = rEvents:FindFirstChild("equipPetEvent")
+            local petsFolder = LocalPlayer:FindFirstChild("petsFolder")
+            if not equip or not petsFolder then return end
+            local all = {}
+            for _, folder in ipairs(petsFolder:GetChildren()) do
+                for _, pet in ipairs(folder:GetChildren()) do
+                    table.insert(all, pet)
+                end
+            end
+            for i = 1, math.min(8, #all) do
+                equip:FireServer("equipPet", all[i])
+                task.wait(0.08)
+            end
+            notify("Pets", "Equipped pets")
+        end)
+    end
+})
+
+Tabs.Pets:AddButton({
+    Title = "Unequip All Pets",
+    Callback = function()
+        pcall(function()
+            local equip = rEvents:FindFirstChild("equipPetEvent")
+            local petsFolder = LocalPlayer:FindFirstChild("petsFolder")
+            if not equip or not petsFolder then return end
+            for _, folder in ipairs(petsFolder:GetChildren()) do
+                for _, pet in ipairs(folder:GetChildren()) do
+                    equip:FireServer("unequipPet", pet)
+                    task.wait(0.03)
+                end
+            end
+            notify("Pets", "Unequipped all")
+        end)
+    end
+})
+
+-- ===================== KILLING TAB =====================
+Tabs.Killing:AddParagraph({
+    Title = "Combat",
+    Content = "Kill aura / kill all / spectate"
+})
+
+_G.MYNGUU_Whitelist = _G.MYNGUU_Whitelist or {}
+_G.MYNGUU_KillAll = false
+_G.MYNGUU_KillAura = false
+_G.MYNGUU_AuraRange = 50
+
+local function playerNames()
+    local t = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(t, p.Name)
+        end
+    end
+    table.sort(t)
+    return t
+end
+
+local killTarget = nil
+local spectateTarget = nil
+
+Tabs.Killing:AddDropdown("KillTarget", {
+    Title = "Select Player",
+    Values = playerNames(),
+    Multi = false,
+    Default = 1,
+    Callback = function(v)
+        killTarget = v
+    end
+})
+
+Tabs.Killing:AddButton({
+    Title = "Refresh Player List",
+    Callback = function()
+        notify("Killing", "Re-open dropdown / re-execute for full refresh. Current target: " .. tostring(killTarget))
+    end
+})
+
+Tabs.Killing:AddToggle("KillSelected", {
+    Title = "Auto Kill Selected",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_KillSelected = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_KillSelected do
+                    pcall(function()
+                        local plr = killTarget and Players:FindFirstChild(killTarget)
+                        local char = plr and plr.Character
+                        local root = char and char:FindFirstChild("HumanoidRootPart")
+                        local my = getHRP()
+                        if root and my then
+                            my.CFrame = root.CFrame * CFrame.new(0, 0, 3)
+                            equipTool("Punch")
+                            firePunch()
+                        end
+                    end)
+                    task.wait(0.05)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Killing:AddToggle("KillEveryone", {
+    Title = "Auto Kill Everyone",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_KillAll = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_KillAll do
+                    for _, plr in ipairs(Players:GetPlayers()) do
+                        if not _G.MYNGUU_KillAll then break end
+                        if plr ~= LocalPlayer and not _G.MYNGUU_Whitelist[plr.Name] then
+                            pcall(function()
+                                local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                                local my = getHRP()
+                                if root and my then
+                                    my.CFrame = root.CFrame * CFrame.new(0, 0, 3)
+                                    equipTool("Punch")
+                                    firePunch()
+                                end
+                            end)
+                            task.wait(0.08)
+                        end
+                    end
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Killing:AddDropdown("WhitelistAdd", {
+    Title = "Add to Whitelist",
+    Values = playerNames(),
+    Multi = false,
+    Default = 1,
+    Callback = function(v)
+        if v then
+            _G.MYNGUU_Whitelist[v] = true
+            notify("Whitelist", "Added " .. v)
+        end
+    end
+})
+
+Tabs.Killing:AddButton({
+    Title = "Clear Whitelist",
+    Callback = function()
+        _G.MYNGUU_Whitelist = {}
+        notify("Whitelist", "Cleared")
+    end
+})
+
+Tabs.Killing:AddInput("AuraRange", {
+    Title = "Kill Aura Range (1-140)",
+    Default = "50",
+    Numeric = true,
+    Finished = false,
+    Callback = function(v)
+        local n = tonumber(v)
+        if n then
+            _G.MYNGUU_AuraRange = math.clamp(n, 1, 140)
+        end
+    end
+})
+
+Tabs.Killing:AddToggle("KillAura", {
+    Title = "Kill Aura",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_KillAura = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_KillAura do
+                    pcall(function()
+                        local my = getHRP()
+                        if not my then return end
+                        for _, plr in ipairs(Players:GetPlayers()) do
+                            if plr ~= LocalPlayer and not _G.MYNGUU_Whitelist[plr.Name] then
+                                local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                                if root and (root.Position - my.Position).Magnitude <= _G.MYNGUU_AuraRange then
+                                    equipTool("Punch")
+                                    firePunch()
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(0.05)
+                end
+            end)
+        end
+    end
+})
+
+Tabs.Killing:AddToggle("Spectate", {
+    Title = "Spectate Selected",
+    Default = false,
+    Callback = function(bool)
+        _G.MYNGUU_Spec = bool
+        if bool then
+            task.spawn(function()
+                while _G.MYNGUU_Spec do
+                    pcall(function()
+                        local plr = killTarget and Players:FindFirstChild(killTarget)
+                        local cam = workspace.CurrentCamera
+                        local hum = plr and plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+                        if cam and hum then
+                            cam.CameraSubject = hum
+                        end
+                    end)
+                    task.wait(0.2)
+                end
+                pcall(function()
+                    local hum = getHum()
+                    if hum then
+                        workspace.CurrentCamera.CameraSubject = hum
+                    end
+                end)
+            end)
+        else
+            pcall(function()
+                local hum = getHum()
+                if hum then
+                    workspace.CurrentCamera.CameraSubject = hum
+                end
+            end)
+        end
+    end
+})
+
+-- ===================== TELEPORTS =====================
+local gyms = {
+    {"Spawn", CFrame.new(2, 8, 110)},
+    {"Beach", CFrame.new(434, 8, -377)},
+    {"Frost Gym", CFrame.new(-2556, 8, -460)},
+    {"Mythical Gym", CFrame.new(2148, 8, 1230)},
+    {"Eternal Gym", CFrame.new(-6980, 8, -1200)},
+    {"Legend Beach", CFrame.new(-8750, 8, -5600)},
+    {"Muscle King Gym", CFrame.new(-8751, 121, -5861)},
+    {"Jungle Gym", CFrame.new(1800, 8, -3200)},
+    {"Industrial Gym", CFrame.new(-3200, 8, 2800)},
+}
+
+for _, info in ipairs(gyms) do
+    local name, cf = info[1], info[2]
+    Tabs.Teleports:AddButton({
+        Title = "TP " .. name,
+        Callback = function()
+            local hrp = getHRP()
+            if hrp then
+                hrp.CFrame = cf
+                notify("Teleport", name)
+            end
+        end
+    })
+end
+
+-- ===================== SPECS TAB =====================
+Tabs.Specs:AddParagraph({
+    Title = "Player Spy",
+    Content = "Select a player to view stats"
+})
+
+local spyTarget = nil
+local spyLabels = {}
+
+Tabs.Specs:AddDropdown("SpyPlayer", {
+    Title = "Choose Player",
+    Values = playerNames(),
+    Multi = false,
+    Default = 1,
+    Callback = function(v)
+        spyTarget = v
+    end
+})
+
+local spyPara = Tabs.Specs:AddParagraph({
+    Title = "Stats",
+    Content = "Select a player..."
+})
+
+task.spawn(function()
+    while true do
+        pcall(function()
+            if spyTarget then
+                local plr = Players:FindFirstChild(spyTarget)
+                if plr then
+                    local ls = plr:FindFirstChild("leaderstats")
+                    local str = ls and ls:FindFirstChild("Strength")
+                    local reb = ls and ls:FindFirstChild("Rebirths")
+                    local kills = ls and ls:FindFirstChild("Kills")
+                    local dur = plr:FindFirstChild("Durability")
+                    local agi = plr:FindFirstChild("Agility")
+                    local lines = {
+                        "Name: " .. plr.DisplayName .. " (@" .. plr.Name .. ")",
+                        "Strength: " .. tostring(str and str.Value or "?"),
+                        "Rebirths: " .. tostring(reb and reb.Value or "?"),
+                        "Durability: " .. tostring(dur and dur.Value or "?"),
+                        "Agility: " .. tostring(agi and agi.Value or "?"),
+                        "Kills: " .. tostring(kills and kills.Value or "?"),
+                    }
+                    if spyPara and spyPara.SetDesc then
+                        spyPara:SetDesc(table.concat(lines, "\n"))
+                    end
+                end
+            end
+        end)
+        task.wait(0.5)
+    end
+end)
+
+-- ===================== INFO =====================
+Tabs.Info:AddParagraph({
+    Title = "MYNGUU PRIVATE SCRIPT",
+    Content = "Muscle Legends private hub\nUI Library: Fluent\nVersion: 1.0.0"
+})
+
+Tabs.Info:AddButton({
+    Title = "Copy Discord",
+    Callback = function()
+        pcall(function()
+            setclipboard("https://discord.gg/jGwggtpnN")
+        end)
+        notify("MYNGUU", "Discord link copied")
+    end
+})
+
+Tabs.Info:AddParagraph({
+    Title = "Credits",
+    Content = "Script logic adapted for MYNGUU\nUI by Fluent (dawid-scripts)\nNot using WindUI"
+})
+
+Window:SelectTab(1)
+
+notify("MYNGUU PRIVATE SCRIPT", "Loaded successfully | Fluent UI", 4)
+print("MYNGUU PRIVATE SCRIPT v1.0 loaded | Fluent UI | Muscle Legends")
