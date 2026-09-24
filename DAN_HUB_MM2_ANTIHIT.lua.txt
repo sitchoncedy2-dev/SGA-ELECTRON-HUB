@@ -1,0 +1,551 @@
+--[[
+	DAN HUB | Murder Mystery 2
+	MAIN — Anti Hit / Godmode
+	UI: WindUI
+	Logic: Anti TP Bat desync source
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local LP = Players.LocalPlayer
+
+local environment = (getgenv and getgenv()) or _G
+local RUNTIME_KEY = "__DAN_MM2_ANTIHIT_RUNTIME"
+local previousRuntime = environment[RUNTIME_KEY]
+if type(previousRuntime) == "table" and type(previousRuntime.destroy) == "function" then
+	pcall(previousRuntime.destroy)
+end
+
+local runtime = {
+	alive = true,
+	enabled = false,
+	character = nil,
+	rootPart = nil,
+	fakeRoot = nil,
+	repRootOwner = nil,
+	stepConnection = nil,
+	connections = {},
+	mode = "ORIGINAL",
+	loopActive = false,
+	loopConnection = nil,
+	originalCFrame = nil,
+	config = {
+		Radius = 25,
+		VelocityThreshold = 60,
+		DeltaThreshold = 15,
+		AnchorTime = 0.2,
+		PushPower = 800,
+		PushEnabled = true,
+		AnchorEnabled = true,
+		Cooldown = 0.15,
+		LastTrigger = 0,
+		FlashEnabled = false,
+	},
+}
+environment[RUNTIME_KEY] = runtime
+
+local function disconnect(conn)
+	if conn then pcall(function() conn:Disconnect() end) end
+end
+
+local function connect(signal, callback)
+	local connection = signal:Connect(callback)
+	table.insert(runtime.connections, connection)
+	return connection
+end
+
+local function isBasePart(instance)
+	if not instance then return false end
+	local ok, result = pcall(function() return instance:IsA("BasePart") end)
+	return ok and result == true
+end
+
+local function getCurrentRoot(character)
+	character = character or LP.Character
+	if not character then return nil end
+	local ok, root = pcall(function() return character:FindFirstChild("HumanoidRootPart") end)
+	if ok and isBasePart(root) then return root end
+	return nil
+end
+
+local function findGlobalFunction(...)
+	for index = 1, select("#", ...) do
+		local name = select(index, ...)
+		local value = rawget(environment, name)
+		if type(value) == "function" then return value end
+		value = rawget(_G, name)
+		if type(value) == "function" then return value end
+	end
+	return nil
+end
+
+local function setHidden(instance, property, value)
+	if not instance then return false end
+	local setter = findGlobalFunction("sethiddenproperty", "set_hidden_property", "sethiddenprop", "set_hidden_prop")
+	if setter then
+		local ok = pcall(setter, instance, property, value)
+		if ok then return true end
+	end
+	return pcall(function() instance[property] = value end)
+end
+
+local function getHidden(instance, property)
+	if not instance then return false, nil end
+	local getter = findGlobalFunction("gethiddenproperty", "get_hidden_property", "gethiddenprop", "get_hidden_prop")
+	if getter then
+		local ok, value = pcall(getter, instance, property)
+		if ok then return true, value end
+	end
+	local ok, value = pcall(function() return instance[property] end)
+	return ok, value
+end
+
+pcall(function()
+	setHidden(LP, "MaximumSimulationRadius", math.huge)
+	setHidden(LP, "SimulationRadius", math.huge)
+end)
+pcall(function()
+	local networkSettings = settings().Network
+	networkSettings.InterpolationThrottling = Enum.InterpolationThrottlingMode.Disabled
+end)
+pcall(function()
+	local physicsSettings = settings().Physics
+	physicsSettings.PhysicsEnvironmentalThrottle = Enum.EnviromentalPhysicsThrottle.Disabled
+	physicsSettings.AllowSleep = false
+end)
+
+local FAKE_ROOT_NAME = "DanMM2_DesyncRoot"
+local FAKE_ROOT_Y = -2500
+local FAKE_ROOT_VELOCITY = Vector3.new(0, -1000, 0)
+
+local function fakeRootIsUsable()
+	local fake = runtime.fakeRoot
+	if not isBasePart(fake) then return false end
+	local ok, parent = pcall(function() return fake.Parent end)
+	return ok and parent ~= nil
+end
+
+local function destroyFakeRoot()
+	local fake = runtime.fakeRoot
+	runtime.fakeRoot = nil
+	if fake then pcall(function() fake:Destroy() end) end
+end
+
+local function createFakeRoot(basePosition)
+	destroyFakeRoot()
+	local fake = Instance.new("Part")
+	fake.Name = FAKE_ROOT_NAME
+	fake.Size = Vector3.new(2, 2, 1)
+	fake.Anchored = true
+	fake.CanCollide = false
+	fake.CanTouch = false
+	fake.CanQuery = false
+	fake.Transparency = 1
+	fake.CFrame = CFrame.new(basePosition.X, FAKE_ROOT_Y, basePosition.Z)
+	fake.AssemblyLinearVelocity = FAKE_ROOT_VELOCITY
+	fake.Parent = Workspace
+	runtime.fakeRoot = fake
+	return fake
+end
+
+local function assignFakeReplicationRoot(rootPart, fake)
+	if not isBasePart(rootPart) or not isBasePart(fake) then return false end
+	runtime.repRootOwner = rootPart
+	return setHidden(rootPart, "PhysicsRepRootPart", fake)
+end
+
+local function restoreReplicationRoot()
+	local root = runtime.rootPart or getCurrentRoot()
+	if isBasePart(root) then
+		setHidden(root, "PhysicsRepRootPart", root)
+	end
+	if isBasePart(runtime.repRootOwner) and runtime.repRootOwner ~= root then
+		setHidden(runtime.repRootOwner, "PhysicsRepRootPart", runtime.repRootOwner)
+	end
+	runtime.repRootOwner = nil
+end
+
+local function stepDesync()
+	if not runtime.alive or not runtime.enabled then return end
+	local root = runtime.rootPart
+	if not isBasePart(root) then
+		root = getCurrentRoot(runtime.character)
+		runtime.rootPart = root
+	end
+	if not root then return end
+	if not fakeRootIsUsable() then
+		local fake = createFakeRoot(root.Position)
+		assignFakeReplicationRoot(root, fake)
+		return
+	end
+	local fake = runtime.fakeRoot
+	pcall(function()
+		fake.Anchored = true
+		fake.AssemblyLinearVelocity = FAKE_ROOT_VELOCITY
+	end)
+	local gotValue, current = getHidden(root, "PhysicsRepRootPart")
+	if not gotValue or current ~= fake then
+		setHidden(root, "PhysicsRepRootPart", fake)
+	end
+end
+
+local function stopStepConnection()
+	disconnect(runtime.stepConnection)
+	runtime.stepConnection = nil
+end
+
+local function startStepConnection()
+	stopStepConnection()
+	runtime.stepConnection = RunService.Stepped:Connect(stepDesync)
+end
+
+local function moveFakeTo(cf)
+	local fake = runtime.fakeRoot
+	if not isBasePart(fake) then return end
+	pcall(function() fake.CFrame = cf end)
+end
+
+local function applyModeToFake()
+	local fake = runtime.fakeRoot
+	if not isBasePart(fake) then return end
+	local base = runtime.originalCFrame
+	if not base then return end
+	local mode = runtime.mode
+	local targetCFrame
+	if mode == "ORIGINAL" then
+		targetCFrame = base + Vector3.new(0, -9999, 0)
+	elseif mode == "VOID" then
+		targetCFrame = CFrame.new(base.Position.X, -999, base.Position.Z)
+	elseif mode == "OCEAN" then
+		targetCFrame = base + Vector3.new(200, 0, 0)
+	elseif mode == "GROUND" then
+		targetCFrame = base + Vector3.new(0, -10, 0)
+	elseif mode == "SPACE" then
+		targetCFrame = base + Vector3.new(0, 99, 0)
+	elseif mode == "RANDOM BLINK" then
+		targetCFrame = base + Vector3.new(math.random(-100, 100), math.random(-50, 50), math.random(-100, 100))
+	end
+	if targetCFrame then moveFakeTo(targetCFrame) end
+end
+
+local function stopLoop()
+	runtime.loopActive = false
+	disconnect(runtime.loopConnection)
+	runtime.loopConnection = nil
+end
+
+local function startLoop()
+	stopLoop()
+	runtime.loopActive = true
+	runtime.loopConnection = RunService.Heartbeat:Connect(function()
+		if not runtime.alive or not runtime.enabled or not runtime.loopActive then return end
+		local fake = runtime.fakeRoot
+		if not isBasePart(fake) then return end
+		local base = runtime.originalCFrame
+		if not base then return end
+		applyModeToFake()
+		task.delay(0.2, function()
+			if not runtime.alive or not runtime.enabled then return end
+			local f = runtime.fakeRoot
+			if not isBasePart(f) then return end
+			pcall(function() f.CFrame = base end)
+		end)
+	end)
+end
+
+local trackers = {}
+local function GetRoot(plr)
+	local c = plr and plr.Character
+	return c and c:FindFirstChild("HumanoidRootPart") or nil
+end
+local function GetChar(plr) return plr and plr.Character or nil end
+
+local function CheckTeleport(plr, root)
+	local now = tick()
+	local prev = trackers[plr]
+	if not prev then
+		trackers[plr] = { lastPos = root.Position, lastTime = now }
+		return false
+	end
+	local dt = now - prev.lastTime
+	if dt < 0.005 then return false end
+	local delta = (root.Position - prev.lastPos).Magnitude
+	local speed = delta / dt
+	prev.lastPos = root.Position
+	prev.lastTime = now
+	if speed > runtime.config.VelocityThreshold or delta > runtime.config.DeltaThreshold then
+		return true
+	end
+	return false
+end
+
+local function HasTool(plr)
+	local c = GetChar(plr)
+	if not c then return false end
+	return c:FindFirstChildOfClass("Tool") ~= nil
+end
+
+local isAnchored = false
+local lastAnchorParts = {}
+
+local function AnchorSelf()
+	if not runtime.config.AnchorEnabled then return end
+	if isAnchored then return end
+	isAnchored = true
+	local char = LP.Character
+	if not char then isAnchored = false return end
+	lastAnchorParts = {}
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			table.insert(lastAnchorParts, { part = part, anchored = part.Anchored })
+			part.Anchored = true
+		end
+	end
+	task.delay(runtime.config.AnchorTime, function()
+		for _, entry in ipairs(lastAnchorParts) do
+			if entry.part and entry.part.Parent then
+				entry.part.Anchored = entry.anchored
+			end
+		end
+		lastAnchorParts = {}
+		isAnchored = false
+	end)
+end
+
+local function PushAttacker(attacker, myRoot)
+	if not runtime.config.PushEnabled then return end
+	local atkRoot = GetRoot(attacker)
+	if not atkRoot then return end
+	local dir = atkRoot.Position - myRoot.Position
+	if dir.Magnitude < 0.1 then
+		dir = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1))
+	end
+	dir = dir.Unit
+	if dir.Y ~= dir.Y then dir = Vector3.new(1, 0, 0) end
+	pcall(function() atkRoot:SetNetworkOwner(LP) end)
+	local force = dir * runtime.config.PushPower + Vector3.new(0, 100, 0)
+	pcall(function() atkRoot.AssemblyLinearVelocity = force end)
+	pcall(function()
+		local old = atkRoot:FindFirstChild("AntiTPBat_Push")
+		if old then old:Destroy() end
+		local oldAtt = atkRoot:FindFirstChild("AntiTPBat_Att")
+		if oldAtt then oldAtt:Destroy() end
+		local att = Instance.new("Attachment")
+		att.Name = "AntiTPBat_Att"
+		att.Parent = atkRoot
+		local lv = Instance.new("LinearVelocity")
+		lv.Name = "AntiTPBat_Push"
+		lv.Attachment0 = att
+		lv.MaxForce = math.huge
+		lv.VectorVelocity = force
+		lv.RelativeTo = Enum.ActuatorRelativeTo.World
+		lv.Parent = atkRoot
+		task.delay(0.25, function()
+			if lv and lv.Parent then lv:Destroy() end
+			if att and att.Parent then att:Destroy() end
+		end)
+	end)
+end
+
+local function Activate(attacker)
+	local now = tick()
+	if now - runtime.config.LastTrigger < runtime.config.Cooldown then return end
+	runtime.config.LastTrigger = now
+	local myRoot = GetRoot(LP)
+	if not myRoot then return end
+	if attacker then PushAttacker(attacker, myRoot) end
+	AnchorSelf()
+end
+
+local detectionConn
+local function StartDetection()
+	if detectionConn then detectionConn:Disconnect() end
+	detectionConn = RunService.Heartbeat:Connect(function()
+		if not runtime.enabled then return end
+		if isAnchored then return end
+		local myRoot = GetRoot(LP)
+		if not myRoot then return end
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LP then
+				local root = GetRoot(plr)
+				if root then
+					local dist = (root.Position - myRoot.Position).Magnitude
+					if dist <= runtime.config.Radius then
+						if CheckTeleport(plr, root) then
+							Activate(plr)
+							return
+						end
+						if dist < 6 and HasTool(plr) then
+							Activate(plr)
+							return
+						end
+					else
+						CheckTeleport(plr, root)
+					end
+				end
+			end
+		end
+	end)
+end
+
+local function StopDetection()
+	if detectionConn then detectionConn:Disconnect() detectionConn = nil end
+end
+
+local function bindCharacter(character)
+	local oldRoot = runtime.rootPart
+	runtime.character = character
+	runtime.rootPart = getCurrentRoot(character)
+	if runtime.enabled then
+		if isBasePart(oldRoot) and oldRoot ~= runtime.rootPart then
+			setHidden(oldRoot, "PhysicsRepRootPart", oldRoot)
+		end
+		destroyFakeRoot()
+		local root = runtime.rootPart
+		if not root and character then
+			local ok, waitedRoot = pcall(function()
+				return character:WaitForChild("HumanoidRootPart", 8)
+			end)
+			if ok and isBasePart(waitedRoot) then
+				root = waitedRoot
+				runtime.rootPart = root
+			end
+		end
+		if root then
+			runtime.originalCFrame = root.CFrame
+			local fake = createFakeRoot(root.Position)
+			assignFakeReplicationRoot(root, fake)
+			startStepConnection()
+			applyModeToFake()
+		end
+	end
+end
+
+bindCharacter(LP.Character)
+connect(LP.CharacterAdded, function(character)
+	task.defer(bindCharacter, character)
+end)
+
+local function setEnabled(value)
+	if not runtime.alive then return false end
+	value = value == true
+	if runtime.enabled == value then return value end
+
+	if value then
+		local root = getCurrentRoot(runtime.character or LP.Character)
+		if not root then return false end
+		runtime.rootPart = root
+		runtime.character = LP.Character
+		runtime.originalCFrame = root.CFrame
+		runtime.enabled = true
+		local fake = createFakeRoot(root.Position)
+		assignFakeReplicationRoot(root, fake)
+		startStepConnection()
+		StartDetection()
+		if runtime.mode == "ORIGINAL" or runtime.config.FlashEnabled then
+			startLoop()
+		else
+			applyModeToFake()
+		end
+	else
+		runtime.enabled = false
+		stopLoop()
+		StopDetection()
+		stopStepConnection()
+		restoreReplicationRoot()
+		destroyFakeRoot()
+		local root = runtime.rootPart or getCurrentRoot(runtime.character)
+		if isBasePart(root) then
+			pcall(function() root:SetNetworkOwner(LP) end)
+		end
+		runtime.originalCFrame = nil
+	end
+	return runtime.enabled
+end
+
+function runtime.destroy()
+	runtime.alive = false
+	runtime.enabled = false
+	stopLoop()
+	StopDetection()
+	stopStepConnection()
+	restoreReplicationRoot()
+	destroyFakeRoot()
+	for _, c in ipairs(runtime.connections) do
+		disconnect(c)
+	end
+	table.clear(runtime.connections)
+	if environment[RUNTIME_KEY] == runtime then
+		environment[RUNTIME_KEY] = nil
+	end
+end
+
+_G.DanMM2AntiHit = {
+	SetEnabled = setEnabled,
+	IsEnabled = function() return runtime.enabled end,
+	Destroy = runtime.destroy,
+}
+
+-- ===== WindUI — 1 tab MAIN, 1 feature =====
+local WindUI
+for _, url in ipairs({
+	"https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+	"https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
+}) do
+	local ok, res = pcall(function()
+		return loadstring(game:HttpGet(url))()
+	end)
+	if ok and res then
+		WindUI = res
+		break
+	end
+end
+
+if not WindUI then
+	warn("[DAN HUB MM2] WindUI failed — use _G.DanMM2AntiHit:SetEnabled(true)")
+	return
+end
+
+local Window = WindUI:CreateWindow({
+	Title = "DAN HUB | MM2",
+	Author = "SGA",
+	Folder = "DanHubMM2AntiHit",
+	Size = UDim2.fromOffset(420, 280),
+	Transparent = true,
+	Theme = "Dark",
+})
+
+local MainTab = Window:Tab({ Title = "MAIN", Icon = "shield" })
+
+MainTab:Section({ Title = "Combat" })
+MainTab:Toggle({
+	Title = "Anti Hit / Godmode",
+	Desc = "Desync anti-hit (TP bat / knife defense)",
+	Value = false,
+	Callback = function(v)
+		local on = setEnabled(v)
+		if v and not on then
+			WindUI:Notify({
+				Title = "DAN HUB",
+				Content = "Need character / HumanoidRootPart",
+				Duration = 3,
+			})
+		else
+			WindUI:Notify({
+				Title = "DAN HUB",
+				Content = on and "Anti Hit ON" or "Anti Hit OFF",
+				Duration = 2,
+			})
+		end
+	end,
+})
+
+MainTab:Paragraph({
+	Title = "Info",
+	Desc = "Uses PhysicsRepRootPart desync + near-player tool/TP detection. Toggle off to restore movement.",
+})
+
+WindUI:Notify({ Title = "DAN HUB", Content = "MM2 Anti Hit ready", Duration = 3 })
+print("[DAN HUB MM2] Anti Hit loaded")
